@@ -147,6 +147,7 @@ async def decide(pkgs):
                 i = todo[g["index"]]
                 v = validate(pkgs[i], g)
                 if not v: print("INVALID", json.dumps(g)[:600])
+                if v:
                     out[i] = v
                     db.execute("insert or replace into decisions values(?,?)", (keys[i], json.dumps(v)))
         except Exception as e:
