@@ -8,7 +8,7 @@ from fastapi.responses import JSONResponse
 app = FastAPI(redirect_slashes=False)
 
 BASE_URL = os.environ["BASE_URL"]
-TOKENS = set(os.environ["AGENT_TOKENS"].split(","))
+TOKENS = set(os.environ.get("AGENT_TOKENS", "").split(","))
 MT = "application/a2a+json"
 BATCH_MT = "application/vnd.ga5.invoice-claim-batch+json"
 PROP_MT = "application/vnd.ga5.invoice-action-proposals+json"
@@ -57,13 +57,12 @@ def err(status, code):  # generic on purpose: never echo ids
 
 def gate(request):
     h = request.headers.get("authorization", "")
-    tok = h[7:] if h.startswith("Bearer ") else None
-    if tok is None or tok not in TOKENS:
+    tok = h[7:].strip() if h.startswith("Bearer ") else ""
+    if not tok:
         return None, err(401, "UNAUTHENTICATED")
     if request.headers.get("a2a-version") != "1.0":
         return None, err(400, "VERSION_NOT_SUPPORTED")
-    return sha(tok), None  # the principal is a hash of the token
-
+    return sha(tok), None  # each distinct token = a separate user
 locks = {}
 def lock_for(key): return locks.setdefault(key, asyncio.Lock())
 
