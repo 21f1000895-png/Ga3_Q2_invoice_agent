@@ -242,8 +242,16 @@ async def get_task(tid: str, request: Request):
 async def list_tasks(request: Request):
     p, e = gate(request)
     if e: return e
-    rows = db.execute("select data from tasks where principal=? order by rowid", (p,)).fetchall()
-    return reply({"tasks": [json.loads(r[0]) for r in rows]})
+    rows = db.execute("select data from tasks where principal=? order by rowid desc limit 10", (p,)).fetchall()
+    out = []
+    for r in rows:
+        t = json.loads(r[0])
+        # keep history entries but drop their big payloads
+        t["history"] = [{**{k: v for k, v in m.items() if k != "parts"},
+                         "parts": [{"mediaType": x.get("mediaType")} for x in m.get("parts", [])]}
+                        for m in t.get("history", [])]
+        out.append(t)
+    return reply({"tasks": out})
 
 @app.post("/a2a/tasks/{tid}:cancel")
 async def cancel(tid: str, request: Request):
