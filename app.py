@@ -98,14 +98,20 @@ amountMinor is an integer in minor units (cents/paise)."""
 async def call_llm(pkgs):
     user = "\n\n".join(f"### PACKAGE index={i}\n{json.dumps(p, ensure_ascii=False)}"
                        for i, p in enumerate(pkgs))
-    async with httpx.AsyncClient(timeout=35) as c:
+    async with httpx.AsyncClient(timeout=40) as c:
         r = await c.post(os.environ["LLM_URL"],
             headers={"Authorization": "Bearer " + os.environ["LLM_KEY"]},
             json={"model": os.environ["LLM_MODEL"], "temperature": 0,
                   "response_format": {"type": "json_object"},
                   "messages": [{"role": "system", "content": SYSTEM},
                                {"role": "user", "content": user}]})
-    return json.loads(r.json()["choices"][0]["message"]["content"])["decisions"]
+    if r.status_code != 200:
+        print("LLM HTTP", r.status_code, r.text[:500])
+        raise RuntimeError("llm http error")
+    txt = r.json()["choices"][0]["message"]["content"].strip()
+    txt = txt.removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+    data = json.loads(txt)
+    return data["decisions"] if isinstance(data, dict) else data
 
 def validate(pkg, d):
     """Return a clean decision dict, or None if the model's answer is unsafe."""
@@ -132,7 +138,7 @@ async def decide(pkgs):
     for i, k in enumerate(keys):  # 1) cache first
         r = db.execute("select data from decisions where h=?", (k,)).fetchone()
         if r: out[i] = json.loads(r[0])
-    for _ in range(2):            # 2) ONE batched model call (retry once)
+    for _ in range(1):            # 2) ONE batched model call (retry once)
         todo = [i for i, o in enumerate(out) if o is None]
         if not todo: break
         try:
@@ -140,7 +146,7 @@ async def decide(pkgs):
             for g in got:
                 i = todo[g["index"]]
                 v = validate(pkgs[i], g)
-                if v:
+                if not v: print("INVALID", json.dumps(g)[:600])
                     out[i] = v
                     db.execute("insert or replace into decisions values(?,?)", (keys[i], json.dumps(v)))
         except Exception as e:
@@ -178,6 +184,7 @@ def find_part(msg, mt):
     return next((x for x in msg.get("parts", []) if x.get("mediaType") == mt), None)
 
 async def initial(p, msg, mid, h):
+    print("PKG0", json.dumps(msg["parts"][0]["data"]["packages"][0], ensure_ascii=False)[:3500])
     part = find_part(msg, BATCH_MT)
     data = part and part.get("data")
     pkgs = data.get("packages") if isinstance(data, dict) else None
